@@ -9,6 +9,7 @@ import (
 func main() {
 	componentLocation := flag.String("location", "component", "Create Component at location")
 	jsonFileName := flag.String("json", "data.json", "Load json from which component should be generated")
+	group := flag.String("group", "Premium", "Form Io component gourp in which component you want")
 
 	flag.Parse()
 
@@ -22,7 +23,7 @@ func main() {
 		panic(err)
 	}
 
-	err = Generate(compo.Data, *componentLocation)
+	err = Generate(compo.Data, *componentLocation, *group)
 	if err != nil {
 		fmt.Errorf(err.Error())
 	}

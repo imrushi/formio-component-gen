@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,7 +24,7 @@ func JsonDecode(r io.Reader) (JsonData, error) {
 	return jsData, nil
 }
 
-func Generate(data map[string]interface{}, location string) error {
+func Generate(data map[string]interface{}, location string, group string) error {
 	// fmt.Printf("%+v\n",data)
 	componentData := make(map[string]string, 0)
 
@@ -42,6 +44,7 @@ func Generate(data map[string]interface{}, location string) error {
 			if err := os.MkdirAll(filepath.Join(location, strings.ToLower(k)), os.ModePerm); err != nil {
 				return err
 			}
+			fmt.Println(k)
 			//create formio js file
 			err := formIoJs(k, filepath.Join(location, strings.ToLower(k)))
 			if err != nil {
@@ -55,7 +58,7 @@ func Generate(data map[string]interface{}, location string) error {
 			}
 
 			//create unit test js file
-			err = mainJs(k, filepath.Join(location, strings.ToLower(k)), val)
+			err = mainJs(k, filepath.Join(location, strings.ToLower(k)), val, group)
 			if err != nil {
 				return err
 			}
@@ -72,7 +75,6 @@ func Generate(data map[string]interface{}, location string) error {
 				return err
 			}
 		}
-		break
 	}
 	return nil
 }
@@ -96,7 +98,8 @@ export default function() {
       }
     ]
   };
-}`
+}
+`
 	jsContent = strings.ReplaceAll(jsContent, "~filename~", filename)
 	err := os.WriteFile(filepath.Join(loc, filename+".form.js"), []byte(jsContent), 0777)
 	if err != nil {
@@ -119,7 +122,8 @@ describe('~filename~ Component', () => {
     });
     done();
   });
-});`
+});
+`
 	jsContent = strings.ReplaceAll(jsContent, "~filename~", filename)
 	err := os.WriteFile(filepath.Join(loc, filename+".unit.js"), []byte(jsContent), 0777)
 	if err != nil {
@@ -128,19 +132,19 @@ describe('~filename~ Component', () => {
 	return nil
 }
 
-func mainJs(filename string, loc string, val string) error {
+func mainJs(filename string, loc string, val string, group string) error {
 	jsContent := `import Component from '../_classes/component/Component';
 
 export default class ~filename~Component extends Component {
   static schema() {
-    return %v;
+    return %v
   }
 
   static get builderInfo() {
     return {
       title: '~filename~',
       icon: 'cubes',
-      group: 'IPeG',
+      group: '%v',
       weight: 120,
       schema: ~filename~Component.schema()
     };
@@ -149,14 +153,42 @@ export default class ~filename~Component extends Component {
   get defaultSchema() {
     return ~filename~Component.schema();
   }
-}`
+}
+`
 	jsContent = strings.ReplaceAll(jsContent, "~filename~", filename)
-	jsContent = fmt.Sprintf(jsContent, val)
+	r := bytes.NewReader([]byte(val))
+	processString := convertJsonAsPerFormio(r, false)
+	jsContent = fmt.Sprintf(jsContent, processString, group)
 	err := os.WriteFile(filepath.Join(loc, filename+".js"), []byte(jsContent), 0777)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func convertJsonAsPerFormio(r io.Reader, comp bool) string {
+	var sb strings.Builder
+
+	sc := bufio.NewScanner(r)
+
+	for sc.Scan() {
+		if b, a, found := strings.Cut(sc.Text(), ":"); found {
+			if strings.Contains(a, `'`) {
+				temp := strings.Replace(a, `'`, `~`, -1)
+				temp = strings.ReplaceAll(temp, `"`, `'`)
+				fmt.Fprintf(&sb, "%s:%s\n", strings.Trim(b, `" `), strings.ReplaceAll(temp, `~`, `"`))
+			} else {
+				fmt.Fprintf(&sb, "%s:%s\n", strings.Trim(b, `" `), strings.ReplaceAll(a, `"`, `'`))
+			}
+		} else {
+			fmt.Fprintf(&sb, "%s%s\n", strings.Trim(b, `" `), a)
+		}
+	}
+	sb.Write([]byte(";"))
+	if comp {
+		sb.Write([]byte("\n"))
+	}
+	return sb.String()
 }
 
 func editForm(location string, filename string) error {
@@ -190,7 +222,8 @@ func editForm(location string, filename string) error {
     label: 'Custom Element JSON',
     tooltip: 'Enter the JSON for this custom element.'
   }
-];`
+];
+`
 		jsContent = strings.ReplaceAll(jsContent, "~filename~", filename)
 		err := os.WriteFile(filepath.Join(location, "editForm", filename+".edit.display.js"), []byte(jsContent), 0777)
 		if err != nil {
@@ -206,13 +239,16 @@ func fixtures(location string, val string) error {
 			return err
 		}
 
-		comp1 := fmt.Sprintf(`export default %v`, val)
+		r := bytes.NewReader([]byte(val))
+		processString := convertJsonAsPerFormio(r, true)
+
+		comp1 := fmt.Sprintf(`export default %v`, processString)
 		err := os.WriteFile(filepath.Join(location, "fixtures", "comp1.js"), []byte(comp1), 0777)
 		if err != nil {
 			return err
 		}
 
-		index := "export comp1 from './comp1';"
+		index := "export comp1 from './comp1';\n"
 		err = os.WriteFile(filepath.Join(location, "fixtures", "index.js"), []byte(index), 0777)
 		if err != nil {
 			return err
